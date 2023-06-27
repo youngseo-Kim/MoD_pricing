@@ -1,0 +1,10 @@
+\ Model _copy
+\ LP format - for model browsing. Use MPS format to capture full model detail.
+Minimize
+  0 theta[(1,_2),1] + 0 ln_theta[(1,_2),1]
+Subject To
+Bounds
+ -infinity <= theta[(1,_2),1] <= 0.5
+General Constraints
+ ln_theta: ln_theta[(1,_2),1] = LOG ( theta[(1,_2),1] )
+End
