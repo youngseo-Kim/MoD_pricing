@@ -23,6 +23,7 @@ od_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_od.csv")
 configuration
 """
 # od_df = od_df[:5]
+od_df = od_df.sample(n=20, random_state=42) 
 
 
 fuel_cost_per_min = 1/10 # $5/hr # change it to 1/12
@@ -30,7 +31,7 @@ vot = 20 #$/hr
 p_sen = 1/vot*60 # cost to min
 Transit_ASC = -10
 
-file_name = "output_transit_scenarios2.txt"
+file_name = "output_transit_sampled_20.txt" # here you can save the solution to the text file, and do analysis with analyze_result.ipynb.
 # # scenario 1 
 # transit_line = []  
 
