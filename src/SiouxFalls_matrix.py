@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import math
 import re
+from scipy.sparse import diags
 
 """
 implementation of solving profit maximization problem
@@ -23,7 +24,7 @@ od_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_od.csv")
 configuration
 """
 # od_df = od_df[:5]
-od_df = od_df.sample(n=100, random_state=42) 
+od_df = od_df.sample(n=10, random_state=42) 
 
 
 fuel_cost_per_min = 1/10 # $5/hr # change it to 1/12
@@ -31,7 +32,7 @@ vot = 20 #$/hr
 p_sen = 1/vot*60 # cost to min
 Transit_ASC = -10
 
-file_name = "../result/output_transit_sampled_100.txt" # here you can save the solution to the text file, and do analysis with analyze_result.ipynb.
+file_name = "../result/output_matrix_sampled_10.txt" # here you can save the solution to the text file, and do analysis with analyze_result.ipynb.
 # # scenario 1 
 # transit_line = []  
 
@@ -78,7 +79,7 @@ def generate_route_sets_link_elimination(graph, source, target, num_routes):
     return route_sets
 
 # link penalty approach
-def generate_route_sets_link_penalty(graph, source, target, num_routes, penalty_factor=1.5):
+def generate_route_sets_link_penalty(graph, source, target, num_routes, penalty_factor=3):
     route_sets = []
     for i in range(num_routes):
         path = nx.shortest_path(graph, source=source, target=target, weight='weight')
@@ -108,7 +109,7 @@ n_nodes = len(node_df)
 
 
 n_alternative = 1
-n_routes = 3
+r_dim = 3
 
 
 # road_bpr_dict = {(row['init_node'], row['term_node']): lambda flow: row['free_flow_time']*(1+row['b']*(flow/row['capacity'])**row['power']) for index, row in network_df.iterrows()}
@@ -119,9 +120,8 @@ for index, row in network_df.iterrows():
     init_node, term_node = int(row['init_node']), int(row['term_node'])
     free_flow_time, b, capacity, power = row['free_flow_time'], row['b'], row['capacity'], row['power']
     
-    #bpr_func[(init_node, term_node)] = lambda flow, f=free_flow_time, b=b, c=capacity, p=power: f * (1 + b * (flow / c)) # 1 should be substitue with power
-    bpr_func[(init_node, term_node)] = lambda flow, f=free_flow_time, b=b, c=capacity, p=power: f # 1 should be substitue with power
-    
+    bpr_func[(init_node, term_node)] = lambda flow, f=free_flow_time, b=b, c=capacity, p=power: f * (1 + b * (flow / c)) # 1 should be substitue with power
+    #bpr_func[(init_node, term_node)] = lambda flow, f=free_flow_time, b=b, c=capacity, p=power: f # 1 should be substitue with power
 
 
 
@@ -163,7 +163,7 @@ for od_pair_index in range(len(od_df)):
     i,j = od_df['O'].iloc[od_pair_index], od_df['D'].iloc[od_pair_index]
     G = nx.DiGraph()
     G.add_weighted_edges_from(road_link)
-    route_sets = generate_route_sets_link_penalty(G, i, j, n_routes) 
+    route_sets = generate_route_sets_link_penalty(G, i, j, r_dim) 
     OD_route[(i,j)] = route_sets
     
 T = {}
@@ -178,10 +178,10 @@ for (s, t) in ods:
     ASC[(s, t), 2] = Transit_ASC # Transit
 
 
-def create_route(od):
-    (o, d) = od
-    # find all possible routes
-    return (o, d)
+# def create_route(od):
+#     (o, d) = od
+#     # find all possible routes
+#     return (o, d)
     
 
 def indicator(arc, route): 
@@ -193,6 +193,9 @@ def indicator(arc, route):
         raise ValueError("Arc must be a tuple with 2 elements")
 
     # Iterate through the route and check each pair
+    if route is None:
+        return False
+    
     for i in range(len(route) - 1):
         if route[i] == arc[0] and route[i+1] == arc[1]:
             return True
@@ -205,16 +208,7 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     m = gp.Model()
     m.Params.NonConvex = 2 
     m.Params.DualReductions = 0 # to determine if the model is infeasible or unbounded
-    m.setParam("MIPGap", 0.05) # Set the gap to 1 % 0.2
-    # Adjust heuristic efforts
-    # m.setParam('Heuristics', 0.5)  # Adjust this value as needed
-    # #m.setParam('MIPFocus', 1)
-    # m.setParam('Rins', 100)
-    # m.setParam('ZeroObjNodes', 100)
-    
-
-    #m.setParam('Threads', 32)
-
+    m.setParam("MIPGap", 0.01) # Set the gap to 5%
     # m.Params.OutputFlag = 0
     # m.Params.NonConvex = 2 # because of profit_extracting_log term is concave, we need to tell gurobi
     # that this is not a concave model, although it is. 
@@ -230,161 +224,114 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     m._ods = ods #[(id1+1, id2+1) for id1, o in enumerate(O_demand) for id2, d in enumerate(D_demand) if o>0 or d>0 if id1 != id2]
     #m._routes = routes# {key:create_route(key) for key in m._ods}
 
+    od_dim = len(m._ods)
+    j_dim = len(m._alternatives)
+    a_dim = len(m._arcs)
+    n_dim = len(m._nodes)
+
     m._routes = routes
 
     for (o, d) in m._ods:
         # Convert to list of tuples with native Python types
         m._routes[(o, d)] = [tuple(int(r) for r in route) for route in routes[(o, d)]]
 
-    m._theta_vars = m.addVars(list(it.product(m._ods, m._alternatives)), vtype=gp.GRB.CONTINUOUS, lb=0, ub=1, name='theta')
-    # when theta is small, the problem domain is ill-defined 
-    # m._ln_theta_vars = m.addVars(list(it.product(m._ods, m._alternatives)), vtype=gp.GRB.CONTINUOUS, lb = -float('inf'), ub=0, name='ln_theta')
-    # m._ln_theta_n = m.addVars(m._ods, vtype=gp.GRB.CONTINUOUS, lb = -float('inf'), ub=0, name='ln_theta_n')
-
-    # m._pi_vars = m.addVars(list(it.product(m._ods, m._alternatives)), vtype=gp.GRB.CONTINUOUS, lb=0, ub=3, name='pi')
-    m._y_vars = m.addVars(list(it.product(m._arcs, m._ods, m._alternatives)), vtype=gp.GRB.CONTINUOUS, lb=0, name='y') # in fully connected graph, y=z
-    
-    # for theta_var in m._theta_vars.values():
-    #     theta_var.start = 0.5
-    
-    z_vars = []
-    for (o, d) in m._ods:
-        # Create a list of tuples with native Python types for each (o, d) pair and append it to z_vars
-        z_vars.extend([((o, d), tuple(int(r) for r in route), int(alt))
-                            for route, alt in it.product(m._routes[(o, d)], m._alternatives)])
-        
-    m._z_vars = m.addVars(z_vars, vtype = gp.GRB.CONTINUOUS, lb = 0, name = 'z')
-    
-    # create auxiliary variables to deal with non-linear objective function
-    m._f_vars = m.addVars(m._arcs, vtype = gp.GRB.CONTINUOUS, lb = 0, name = 'f')
-    
-    
-    # # Dictionary for initial values
-    # initial_values = {(1, 2): 100, (2, 4): 100, (1, 3):100, (3, 4): 100}
-
-    # # Loop to set initial values
-    # for arc, init_val in initial_values.items():
-    #     m._f_vars[arc].Start = init_val
-    
+    m._theta_vars = m.addMVar((j_dim, od_dim), vtype=gp.GRB.CONTINUOUS, lb=0, ub=1, name='theta')
+    m._y_vars = m.addMVar((j_dim, a_dim, od_dim), vtype=gp.GRB.CONTINUOUS, lb=0, name='y')
+    m._z_vars = m.addMVar((j_dim, r_dim, od_dim), vtype = gp.GRB.CONTINUOUS, lb = 0, name = 'z')
+    m._f_vars = m.addMVar((a_dim), vtype = gp.GRB.CONTINUOUS, lb = 0, name = 'f')
     m._theta_lntheta_vars = m.addVars(list(it.product(m._ods, m._alternatives)), lb = -float('inf'), ub = 0, vtype=gp.GRB.CONTINUOUS, name='theta_ln_theta') #define theta * ln(theta)
-    m._congest_tt = m.addVars(m._ods, lb = 0, vtype=gp.GRB.CONTINUOUS, name='congested_travel_time') 
-
-
+    m._congest_tt = m.addMVar((j_dim, od_dim), lb = 0, vtype=gp.GRB.CONTINUOUS, name='congested_travel_time') 
     m._ind = m.addVars(m._ods, vtype=gp.GRB.BINARY, name="ind")
     m._theta_n = m.addVars(m._ods, vtype=gp.GRB.CONTINUOUS, lb = 0, ub=1, name='theta_n')
     m._profit_extracting_log = m.addVars(m._ods, vtype=gp.GRB.CONTINUOUS, lb = -float('inf'), ub=0, name='extracting_log')
     m._profit_extracting_term = m.addVars(list(it.product(m._ods, m._alternatives)), lb = -float('inf'), ub = 0, vtype=gp.GRB.CONTINUOUS, name='extracting_term')
     
     
-    m._F = m.addVars(m._arcs, vtype = gp.GRB.CONTINUOUS, name = 'F')
-    m._G = m.addVars(m._arcs, vtype = gp.GRB.CONTINUOUS, name = 'G')
-    
+    m._F = m.addMVar((a_dim), vtype = gp.GRB.CONTINUOUS, name = 'F')
 
-    """add constraints"""
-    # relationship between theta and z
-    for j in m._alternatives:
-        for (s, t) in m._ods:
-            lhs = gp.quicksum(m._z_vars[(s, t), r, j] for r in m._routes[(s, t)])
-            rhs = m._theta_vars[(s, t), j]
-            m.addConstr(lhs == rhs, name = "constraint Q (a)")
+    m.addConstrs((gp.quicksum(m._z_vars[j, r, od] for r in range(r_dim)) == m._theta_vars[j, od] for j in range(j_dim) for od in range(od_dim)), name="constraint Q (a)")
+    m.addConstrs((gp.quicksum(m._theta_vars[j, od] for j in range(j_dim)) <= 1 for od in range(od_dim)), name="constraint Q (b)")
+    
+    indicator_matrix = np.zeros((j_dim, od_dim, a_dim, r_dim), dtype=int)
+    for j_ind in range(j_dim):
+        for (od_ind, (s,t)) in enumerate(m._ods):
+            # Fill in the matrix
+            for a_ind, a in enumerate(m._arcs):
+                for r_ind, r in enumerate(m._routes[(s,t)]):
+                    indicator_matrix[j_ind, od_ind, a_ind, r_ind] = 1 if indicator(a, r) else 0
+
+    no_route_matrix = np.ones((j_dim, r_dim, a_dim), dtype=int) # if the route is not exist set it as 1.
+    for j_ind in range(j_dim):
+        for (od_ind, (s,t)) in enumerate(m._ods):
+            for a_ind, a in enumerate(m._arcs):
+                for (r_ind, r) in enumerate(m._routes[(s, t)]):
+                    no_route_matrix[j_ind, r_ind, a_ind] = 0 if indicator(a, r) else 1
+
+
+    # [Option 1]
+    # # Caveat: we need to add constraints to ensure 
+    # m.addConstrs((demand[s,t] * (indicator_matrix[j_ind, od_ind, :, :] @ m._z_vars[j_ind, :, od_ind]) <= m._y_vars[j_ind, :, od_ind] for j_ind in range(j_dim) for (od_ind, (s,t)) in enumerate(m._ods)), name="constraint Q (c)")
+    # m.addConstrs((no_route_matrix[j_ind, r_ind, a_ind] * m._z_vars[j_ind, r_ind, a_ind] == 0 for j_ind in range(j_dim) for r_ind in range(r_dim) for a_ind in range(a_dim)))
+    
+    #[Option 2]
+    m.addConstrs((gp.quicksum([demand[s,t] * m._z_vars[j_ind, r_ind, od_ind] for (r_ind, r) in enumerate(m._routes[(s, t)]) if indicator(a, r)]) <= m._y_vars[j_ind, a_ind, od_ind] for j_ind in range(j_dim) for (a_ind, a) in enumerate(m._arcs) for (od_ind, (s, t)) in enumerate(m._ods)), name = "constraint Q (c)") 
+   
+
+    m.addConstrs((m._f_vars[a_ind] == gp.quicksum(m._y_vars[j_ind, a_ind, od_ind] for j_ind in range(j_dim) for od_ind in range(od_dim)) for a_ind in range(a_dim)), name = "equation Q (d)")
+                      
+
+    # Create a mapping from node to index
+    node_to_index = {node: idx for idx, node in enumerate(m._nodes)}
+
+    # Initialize the node-arc incidence matrix with zeros
+    incidence_matrix = np.zeros((n_dim, a_dim), dtype=int)
+
+    # Populate the incidence matrix
+    for a_ind, (s, t) in enumerate(m._arcs):
+        incidence_matrix[node_to_index[s], a_ind] = -1  # Arc leaves the origin node
+        incidence_matrix[node_to_index[t], a_ind] = 1  # Arc enters the destination node
+
+    m.addConstrs((gp.quicksum(incidence_matrix[n_ind, :] @ m._y_vars[j_ind, :, od_ind] for od_ind in range(od_dim)) == 0 for j_ind in range(j_dim) for n_ind, node in enumerate(m._nodes)), name="constraint Q (e)")
+    
             
-         
-    
-    # sum of theta's <= 1
-    for (s, t) in m._ods:
-        lhs = gp.quicksum(m._theta_vars[(s, t), j] for j in m._alternatives)
-        rhs = 1 #- eps
-        m.addConstr(lhs <= rhs, name = "constraint Q (b)") 
-    
-      
-        
-    # load on arc needed  
-    for j in m._alternatives:
-        for a in m._arcs:
-            for (s, t) in m._ods:
-                m.addConstr(gp.quicksum([demand[s,t] * m._z_vars[(s, t), r, j] for r in m._routes[(s, t)] if indicator(a, r)]) <= m._y_vars[a, (s, t), j], name = "constraint Q (c)") 
-
-                            
-            
-    for a in m._arcs:
-        lhs = m._f_vars[a]
-        rhs = gp.quicksum(m._y_vars[a, (s, t), j] for (s, t) in m._ods for j in m._alternatives)
-        m.addConstr(lhs == rhs, name = "equation Q (d)")
-    
-
-    # flow conservation
-    for j in m._alternatives:
-        for v in m._nodes:
-            lhs = gp.quicksum(m._y_vars[(a, b) , (s, t), j] for (a,b) in m._arcs if v == a for (s, t) in m._ods)
-            rhs = gp.quicksum(m._y_vars[(a, b) , (s, t), j] for (a,b) in m._arcs if v == b for (s, t) in m._ods)
-            m.addConstr(lhs == rhs, name = "constraint Q (e)")
-
-
-
-
-    # bins = 100
-    # xs = [1/bins*i for i in range(bins+1)]
-    # ys = [math.log(p) if p != 0 else 0 for p in xs]
-    # # objective function
-    # for j in m._alternatives:
-    #     m.addGenConstrPWL(m._theta_n[(s, t)], m._ln_theta_n[(s, t)], xs, ys, "pwl")
-    #     for (s, t) in m._ods:
-    #         m.addGenConstrPWL(m._theta_vars[(s, t), j], m._ln_theta_vars[(s, t), j], xs, ys, "pwl")
-
-    # # restrict domain for price
-    # for (s, t) in m._ods:
-    #     for j in m._alternatives:
-    #         lhs = m._pi_vars[(s, t), j]
-    #         rhs = -1/p_sen * (m._ln_theta_vars[(s, t), j] - m._ln_theta_n[(s, t)] + ASC[(s,t), 2] - T[(s,t), 2] - ASC[(s,t), j] + T[(s,t), j] + l[(s,t), j])
-    #         m.addConstr(lhs == rhs, name = "price domain")
-
-
     bins = 10
     xs = [1/bins*i for i in range(bins+1)]
     ys = [p*math.log(p) if p != 0 else 0 for p in xs]
     # objective function
-    for j in m._alternatives:
-        for (s, t) in m._ods:
-            m.addGenConstrPWL(m._theta_vars[(s, t), j], m._theta_lntheta_vars[(s, t), j], xs, ys, "pwl")
+    for (j_ind, j) in enumerate(m._alternatives):
+        for (od_ind, (s, t)) in enumerate(m._ods):
+            m.addGenConstrPWL(m._theta_vars[j_ind, od_ind], m._theta_lntheta_vars[(s, t), j], xs, ys, "pwl")
 
-    bins = 10
-    xs = [1/bins*i for i in range(bins+1)]
+
     ys = [math.log(p) if p > 0 else -1e3 for p in xs] # -1e5 represents -infty. Extremely large value cause numerical stability issues
     # constraints for profit extracting term
-    for (s, t) in m._ods:
-        m.addConstr(m._theta_n[s,t] == 1 - gp.quicksum(m._theta_vars[(s, t), j] for j in m._alternatives), name ='extract') # add except transit mode
+    for (od_ind, (s, t)) in enumerate(m._ods):
         #m.addGenConstrLog(m._theta_n[s,t], m._profit_extracting_log[s,t], name = "ln_profit")
         m.addGenConstrPWL(m._theta_n[s,t], m._profit_extracting_log[s,t], xs, ys, "ln_profit")
-        for j in m._alternatives:
-            m.addConstr(m._profit_extracting_term[(s, t), j] == m._theta_vars[(s, t), j] * m._profit_extracting_log[s,t])
-            
-
-    for (s, t) in m._ods:
-        m.addConstr(m._congest_tt[(s, t)] == gp.quicksum(gp.quicksum(m._z_vars[(s, t), r, j]*m._F[a] for a in m._arcs if indicator(a, r)) for r in m._routes[(s, t)] for j in m._alternatives))
+    m.addConstrs((m._theta_n[s,t] == 1 - gp.quicksum(m._theta_vars[j_ind, od_ind] for j_ind in range(j_dim)) for (od_ind, (s, t)) in enumerate(m._ods)), name ='extract')
+    m.addConstrs((m._profit_extracting_term[(s, t), j] == m._theta_vars[j_ind, od_ind] * m._profit_extracting_log[s,t]) for (od_ind, (s, t)) in enumerate(m._ods) for (j_ind, j) in enumerate(m._alternatives))
 
 
+    m.addConstrs((m._congest_tt[j_ind, od_ind] == indicator_matrix[j_ind, od_ind, :, :] @ m._z_vars[j_ind, :, od_ind] @ m._F for j_ind in range(j_dim) for od_ind in range(od_dim)), name = "congest_tt")
 
-    for a in m._arcs:
-        lhs = m._F[a]
-        rhs = m._bpr_func[a](m._f_vars[a])
-        m.addConstr(lhs == rhs, name = "F_function")
+    m.addConstrs((m._F[a_ind] == m._bpr_func[a](m._f_vars[a_ind]) for (a_ind, a) in enumerate(m._arcs)), name = "F_function")
 
-        lhs = m._G[a]
-        rhs = m._bpr_func[a](m._f_vars[a]) * fuel_cost_per_min #value of time + fuel cost
-        m.addConstr(lhs == rhs, name = "G_function")
-            
-    
-    obj_util = gp.quicksum(demand[s,t]/p_sen * gp.quicksum(m._theta_vars[(s, t), j] * (- m._ASC[(s, t), j] + m._T[(s, t), j] + ASC[(s, t), 2] - T[(s, t), 2]) for j in m._alternatives) for (s, t) in m._ods) # objective function (A)
-    obj_congest = gp.quicksum(demand[s,t]/p_sen * m._congest_tt[(s, t)] for (s, t) in m._ods)
+
+    obj_util = gp.quicksum(demand[s,t]/p_sen * gp.quicksum(m._theta_vars[j_ind, od_ind] * (- m._ASC[(s, t), j] + m._T[(s, t), j] + ASC[(s, t), 2] - T[(s, t), 2]) for (j_ind, j) in enumerate(m._alternatives)) for (od_ind, (s, t)) in enumerate(m._ods)) # objective function (A)
+    obj_congest = gp.quicksum(demand[s,t]/p_sen * m._congest_tt[j_ind, od_ind] for j_ind in range(j_dim) for (od_ind, (s, t)) in enumerate(m._ods))
     obj_entropy = gp.quicksum(demand[s,t]/p_sen * gp.quicksum(m._theta_lntheta_vars[(s, t), j] for j in m._alternatives) for (s, t) in m._ods) # objective function (B)
     obj_profit_extracting = - gp.quicksum(demand[s,t]/p_sen * gp.quicksum(m._profit_extracting_term[(s, t), j] for j in m._alternatives) for (s, t) in m._ods) # objective function (C) 
-    obj_oper_cost = gp.quicksum(gp.quicksum((m._G[a] + oper_cost[a]) * m._y_vars[a , (s, t), j] for a in m._arcs) for j in m._alternatives for (s, t) in m._ods) # objective function (D)
-    #TODO: add constant operating cost 
+    obj_oper_cost = gp.quicksum(gp.quicksum((m._bpr_func[a](m._f_vars[a_ind]) * fuel_cost_per_min + oper_cost[a]) * m._y_vars[j_ind, a_ind, od_ind] for (a_ind, a) in enumerate(m._arcs)) for (j_ind, j) in enumerate(m._alternatives) for (od_ind, (s, t)) in enumerate(m._ods)) # objective function (D)
     # define objective function
     m.setObjective(obj_util + obj_congest + obj_entropy + obj_oper_cost + obj_profit_extracting)  #
 
     m.update()
     m.optimize()
+
+    # # If you have named your constraints, you can also print their names
+    # for constr in m.getConstrs():
+    #     if "constraint Q (c)" in constr.ConstrName:
+    #         print(f'{constr.ConstrName}: {m.getRow(constr)} <= {constr.RHS}')
 
     # m.computeIIS() # this helps us to identify constraints that are responsible to make the model infeasible.
     # m.write("model.ilp")
