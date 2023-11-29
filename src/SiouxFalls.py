@@ -3,6 +3,7 @@ import itertools as it
 import networkx as nx
 import pandas as pd
 import numpy as np
+import random
 import math
 import re
 from scipy.sparse import diags
@@ -14,55 +15,46 @@ author(s):
 yk796@cornell.edu
 nd396@cornell.edu
 """
+# link to https://github.com/bstabler/TransportationNetworks/tree/master/SiouxFalls
 
 # Create the parser
 parser = argparse.ArgumentParser()
 # Add an argument
-# alpha, mip_gap, n_ods, transit_scenario, n_bins
+
+parser.add_argument('--n_ods', required=True) 
+parser.add_argument('--dist', required=True) 
 parser.add_argument('--alpha', required=True)
 parser.add_argument('--beta', required=True)
-parser.add_argument('--mip_gap', required=True) 
-parser.add_argument('--n_ods', required=True) 
 parser.add_argument('--transit_scenario', required=True) 
 parser.add_argument('--n_bins', required=True)
-
+parser.add_argument('--oper_cost', required=True)
+parser.add_argument('--mip_gap', required=True) 
+parser.add_argument('--time_limit', required=True) 
 
 args = parser.parse_args()
-
 n_ods = int(args.n_ods)
-n_bins = int(args.n_bins)
+dist = int(args.dist)
 alpha = float(args.alpha)
 beta = float(args.beta)
-mip_gap = float(args.mip_gap)
 transit_scenario = int(args.transit_scenario)
+n_bins = int(args.n_bins)
+oper_cost = float(args.oper_cost)
+mip_gap = float(args.mip_gap) 
+time_limit = int(args.time_limit) # unit : sec
 
-# link to https://github.com/bstabler/TransportationNetworks/tree/master/SiouxFalls
 
 network_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_net.txt", sep='\t', comment=';')
 node_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_node.txt", sep='\t', comment=';')
-od_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_od.csv")
 
 """
 configuration
 """
-# od_df = od_df[:5]
 
-# n_ods = 10
-# n_bins = 10
-# alpha = 0
-# mip_gap = 0.01 #0.2% #1e-4 is default
-# transit_scenario = 2
-
-# beta = 4
-od_df = od_df.sample(n=n_ods, random_state=42) 
-
-fuel_cost_per_min = 0.08 # USD per min
+file_name = "ods_{}_dist_{}_alpha_{}_beta_{}_transit_{}_bin_{}_opercost_{}_gap_{}_timelimit_{}".format(n_ods, dist, alpha, beta, transit_scenario, n_bins, oper_cost, mip_gap, time_limit) # here you can save the solution to the text file, and do analysis with analyze_result.ipynb.
+fuel_cost_per_min = oper_cost # USD per min
 vot = 20 #$/hr
 p_sen = 1/vot*60 # cost to min
 Transit_ASC = -10
-
-file_name = "alpha_{}_beta_{}_gap_{}_sampled_{}_transit_{}_bin_{}".format(alpha, beta, mip_gap, n_ods, transit_scenario, n_bins) # here you can save the solution to the text file, and do analysis with analyze_result.ipynb.
-
 
 if transit_scenario == 1:
     transit_line = []  
@@ -73,10 +65,14 @@ elif transit_scenario == 3:
     transit_line = [(1, 3), (3, 12), (12, 13), (4, 11), (11, 14), (14, 23), (23, 24), (5, 9), (9, 10), (10, 15), (15, 22), (22, 21), (2, 6), (6, 8), (8, 16), (16, 17), (17, 19), (19, 20),
                     (3, 1), (12, 3), (13, 12), (11, 4), (14, 11), (23, 14), (24, 23), (9, 5), (10, 9), (15, 10), (22, 15), (21, 22), (6, 2), (8, 6), (16, 8), (17, 16), (19, 17), (20, 19)]  
 
+if dist == 1:
+    od_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_od.csv")
+elif dist == 2:
+    od_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_od_dist2.csv")
 
-"""
-end
-"""
+if n_ods < len(od_df):
+    od_df = od_df.sample(n=n_ods, random_state=42) 
+
 
 network_df = network_df[['init_node', 'term_node', 'capacity', 'length', 'free_flow_time', 'b',
        'power', 'speed', 'toll', 'link_type']]
@@ -238,7 +234,7 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     m.Params.DualReductions = 0 # to determine if the model is infeasible or unbounded
     m.setParam("MIPGap", mip_gap) # Set the gap to 5%
     m.Params.LogFile = "../log/"+file_name + ".txt"
-    m.setParam('TimeLimit', 10*60)
+    m.setParam('TimeLimit', time_limit)
     # m.Params.OutputFlag = 0
     # m.Params.NonConvex = 2 # because of profit_extracting_log term is concave, we need to tell gurobi
     # that this is not a concave model, although it is. 
