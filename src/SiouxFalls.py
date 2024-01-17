@@ -136,24 +136,19 @@ n_nodes = len(node_df)
 n_alternative = 1
 r_dim = 3
 
-
-# road_bpr_dict = {(row['init_node'], row['term_node']): lambda flow: row['free_flow_time']*(1+row['b']*(flow/row['capacity'])**row['power']) for index, row in network_df.iterrows()}
-
 bpr_func = {}
-
+link_capacity = {}
 
 for index, row in network_df.iterrows():
     init_node, term_node = int(row['init_node']), int(row['term_node'])
     free_flow_time, b, capacity, power = row['free_flow_time'], row['b'], row['capacity'], row['power']
     
     bpr_func[(init_node, term_node)] = lambda flow, f=free_flow_time, c=capacity, p=power: f * (1 + alpha * (flow / c)**beta) # 1 should be substitue with power
-
+    link_capacity[(init_node, term_node)] = capacity
 
 nodes = node_df['Node'].to_list()
 alternatives = list(range(1, n_alternative+1))
 arcs = list(network_df[['init_node', 'term_node']].to_records(index=False))
-#ods = list(it.permutations(nodes, 2))
-# ods = [(id1+1, id2+1) for id1, o in enumerate(O_demand) for id2, d in enumerate(D_demand) if o>0 or d>0 if id1 != id2]
 
 demand = {(int(row['O']),int(row['D'])): row['Ton'] for index, row in od_df.iterrows()}
 ods = list(demand.keys())
@@ -226,7 +221,7 @@ def indicator(arc, route):
     return False
 
 
-def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, ASC, bpr_func):
+def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, ASC, bpr_func, link_capacity):
     eps = 1e-3
 
     m = gp.Model()
@@ -244,6 +239,7 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     m._T = T
     m._ASC = ASC
     m._bpr_func = bpr_func
+    m._link_capacity = link_capacity
     m._nodes = list(range(1, n_nodes+1))
     m._alternatives = list(range(1, n_alternative+1))
     m._arcs = [tuple(int(a) for a in arc) for arc in arcs]
@@ -265,7 +261,6 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     m._y_vars = m.addMVar((j_dim, a_dim, od_dim), vtype=gp.GRB.CONTINUOUS, lb=0, name='y')
     m._z_vars = m.addMVar((j_dim, r_dim, od_dim), vtype = gp.GRB.CONTINUOUS, lb = 0, name = 'z')
     m._f_vars = m.addMVar((a_dim), vtype = gp.GRB.CONTINUOUS, lb = 0, name = 'f')
-    m._F_approx = m.addMVar((a_dim), vtype = gp.GRB.CONTINUOUS, lb = 0, name = 'F_approx')
     m._theta_lntheta_vars = m.addVars(list(it.product(m._ods, m._alternatives)), lb = -float('inf'), ub = 0, vtype=gp.GRB.CONTINUOUS, name='theta_ln_theta') #define theta * ln(theta)
     m._congest_tt = m.addMVar((j_dim, od_dim), lb = 0, vtype=gp.GRB.CONTINUOUS, name='congested_travel_time') 
     m._ind = m.addVars(m._ods, vtype=gp.GRB.BINARY, name="ind")
@@ -340,18 +335,16 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     m.addConstrs((m._theta_n[s,t] == 1 - gp.quicksum(m._theta_vars[j_ind, od_ind] for j_ind in range(j_dim)) for (od_ind, (s, t)) in enumerate(m._ods)), name ='extract')
     m.addConstrs((m._profit_extracting_term[(s, t), j] == m._theta_vars[j_ind, od_ind] * m._profit_extracting_log[s,t] for (od_ind, (s, t)) in enumerate(m._ods) for (j_ind, j) in enumerate(m._alternatives)), name = "profit_extracting")
 
-    # version 2 for piecewise linear approximation
-
-
-
 
     m.addConstrs((m._congest_tt[j_ind, od_ind] == indicator_matrix[j_ind, od_ind, :, :] @ m._z_vars[j_ind, :, od_ind] @ m._F for j_ind in range(j_dim) for od_ind in range(od_dim)), name = "congest_tt")
 
-    # m.addConstrs((m._F[a_ind] == m._bpr_func[a](m._f_vars[a_ind]) for (a_ind, a) in enumerate(m._arcs)), name = "F_function") #TODO: need PWL approximation
+    # m.addConstrs((m._F[a_ind] == m._bpr_func[a](m._f_vars[a_ind]) for (a_ind, a) in enumerate(m._arcs)), name = "F_function") 
+    # Note: Gurobi cannot handle quadratic function as it is. We need piecewise linear approximation as below. 
 
-    # PWL
+    # Piecewise linear approximation of BPR function, 
     for (a_ind, a) in enumerate(m._arcs):
-        ys = [m._bpr_func[a](p) for p in xs]
+        xs = [m._link_capacity[a]/bins*i for i in range(bins+1)] # the upper bound of volumn to capacity (V/C) ratio is set to 1. 
+        ys = [m._bpr_func[a](p) for p in xs] 
         m.addGenConstrPWL(m._f_vars[a_ind], m._F[a_ind], xs, ys, "F_function")
 
     obj_util = gp.quicksum(demand[s,t]/p_sen * gp.quicksum(m._theta_vars[j_ind, od_ind] * (- m._ASC[(s, t), j] + m._T[(s, t), j] + ASC[(s, t), 2] - T[(s, t), 2]) for (j_ind, j) in enumerate(m._alternatives)) for (od_ind, (s, t)) in enumerate(m._ods)) # objective function (A)
@@ -365,11 +358,6 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     m.update()
     m.write("../model/" + file_name + ".mps")
     m.optimize()
-
-    # # If you have named your constraints, you can also print their names
-    # for constr in m.getConstrs():
-    #     if "constraint Q (c)" in constr.ConstrName:
-    #         print(f'{constr.ConstrName}: {m.getRow(constr)} <= {constr.RHS}')
 
     # m.computeIIS() # this helps us to identify constraints that are responsible to make the model infeasible.
     # m.write("model.ilp")
@@ -386,7 +374,7 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
 
 open("{}".format("../log/" + file_name + ".txt"), "w") # make sure to overwrite previous file 
 
-result = profit_maximization(n_nodes, arcs, OD_route, n_alternative, ods, demand, T, ASC, bpr_func)
+result = profit_maximization(n_nodes, arcs, OD_route, n_alternative, ods, demand, T, ASC, bpr_func, link_capacity)
 
 
 # open a file in write mode
