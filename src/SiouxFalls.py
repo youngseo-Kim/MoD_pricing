@@ -257,6 +257,7 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
         # Convert to list of tuples with native Python types
         m._routes[(o, d)] = [tuple(int(r) for r in route) for route in routes[(o, d)]]
 
+    # Note: we define variables as matrix to fasten computation
     m._theta_vars = m.addMVar((j_dim, od_dim), vtype=gp.GRB.CONTINUOUS, lb=0, ub=1, name='theta')
     m._y_vars = m.addMVar((j_dim, a_dim, od_dim), vtype=gp.GRB.CONTINUOUS, lb=0, name='y')
     m._z_vars = m.addMVar((j_dim, r_dim, od_dim), vtype = gp.GRB.CONTINUOUS, lb = 0, name = 'z')
@@ -295,7 +296,7 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     # m.addConstrs((demand[s,t] * (indicator_matrix[j_ind, od_ind, :, :] @ m._z_vars[j_ind, :, od_ind]) <= m._y_vars[j_ind, :, od_ind] for j_ind in range(j_dim) for (od_ind, (s,t)) in enumerate(m._ods)), name="constraint Q (c)")
     # m.addConstrs((no_route_matrix[j_ind, r_ind, a_ind] * m._z_vars[j_ind, r_ind, a_ind] == 0 for j_ind in range(j_dim) for r_ind in range(r_dim) for a_ind in range(a_dim)))
     
-    #[Option 2]
+    # [Option 2]
     m.addConstrs((gp.quicksum([demand[s,t] * m._z_vars[j_ind, r_ind, od_ind] for (r_ind, r) in enumerate(m._routes[(s, t)]) if indicator(a, r)]) <= m._y_vars[j_ind, a_ind, od_ind] for j_ind in range(j_dim) for (a_ind, a) in enumerate(m._arcs) for (od_ind, (s, t)) in enumerate(m._ods)), name = "constraintQ(c)") 
    
 
@@ -341,7 +342,8 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     # m.addConstrs((m._F[a_ind] == m._bpr_func[a](m._f_vars[a_ind]) for (a_ind, a) in enumerate(m._arcs)), name = "F_function") 
     # Note: Gurobi cannot handle quadratic function as it is. We need piecewise linear approximation as below. 
 
-    # Piecewise linear approximation of BPR function, 
+    # Piecewise linear approximation of BPR function
+    # bins = 15
     for (a_ind, a) in enumerate(m._arcs):
         xs = [m._link_capacity[a]/bins*i for i in range(bins+1)] # the upper bound of volumn to capacity (V/C) ratio is set to 1. 
         ys = [m._bpr_func[a](p) for p in xs] 
