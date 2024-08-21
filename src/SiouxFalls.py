@@ -30,6 +30,8 @@ parser.add_argument('--n_bins', required=True)
 parser.add_argument('--oper_cost', required=True)
 parser.add_argument('--mip_gap', required=True) 
 parser.add_argument('--time_limit', required=True) 
+parser.add_argument('--fleet_size', required=False) 
+parser.add_argument('--tolling', required=False) 
 
 args = parser.parse_args()
 n_ods = int(args.n_ods)
@@ -42,6 +44,26 @@ oper_cost = float(args.oper_cost)
 mip_gap = float(args.mip_gap) 
 time_limit = int(args.time_limit) # unit : sec
 
+if args.fleet_size is None:
+    fleet_size = None  # Default value if the argument is not provided
+else:
+    fleet_size = int(args.fleet_size)  
+    file_name = "ods_{}_dist_{}_alpha_{}_beta_{}_transit_{}_bin_{}_opercost_{}_gap_{}_timelimit_{}_fleet_size_{}".format(n_ods, dist, alpha, beta, transit_scenario, n_bins, oper_cost, mip_gap, time_limit, fleet_size)
+
+if args.tolling is None:
+    tolling_roads = []  
+else:
+    # first trial
+    # tolling_roads = [(6, 8), (8, 16), (16, 17), (17, 19), (19, 20), 
+    #                  (8, 6), (16, 8), (17, 16), (19, 17), (20, 19)]
+
+    tolling_roads = [(10, 16), (11, 14), (14, 11), (16, 10), (17, 19)]   
+   
+    # top 10 [(6, 8), (8, 6), (10, 16), (11, 14), (14, 11), (16, 10), (16, 17), (17, 16), (17, 19), (19, 17)]
+
+    toll = int(args.tolling) # USD
+    file_name = "ods_{}_dist_{}_alpha_{}_beta_{}_transit_{}_bin_{}_opercost_{}_gap_{}_timelimit_{}_toll_{}".format(n_ods, dist, alpha, beta, transit_scenario, n_bins, oper_cost, mip_gap, time_limit, toll)
+
 
 network_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_net.txt", sep='\t', comment=';')
 node_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_node.txt", sep='\t', comment=';')
@@ -49,12 +71,13 @@ node_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_node.txt", sep='\t', commen
 """
 configuration
 """
-
-file_name = "ods_{}_dist_{}_alpha_{}_beta_{}_transit_{}_bin_{}_opercost_{}_gap_{}_timelimit_{}".format(n_ods, dist, alpha, beta, transit_scenario, n_bins, oper_cost, mip_gap, time_limit) # here you can save the solution to the text file, and do analysis with analyze_result.ipynb.
-fuel_cost_per_min = oper_cost # USD per min
+if args.fleet_size is None and args.tolling is None:
+    file_name = "ods_{}_dist_{}_alpha_{}_beta_{}_transit_{}_bin_{}_opercost_{}_gap_{}_timelimit_{}".format(n_ods, dist, alpha, beta, transit_scenario, n_bins, oper_cost, mip_gap, time_limit) # here you can save the solution to the text file, and do analysis with analyze_result.ipynb.
+fuel_cost_per_km = oper_cost # USD per km 
 vot = 20 #$/hr
 p_sen = 1/vot*60 # cost to min
 Transit_ASC = -10
+
 
 if transit_scenario == 1:
     transit_line = []  
@@ -64,6 +87,13 @@ elif transit_scenario == 2:
 elif transit_scenario == 3:
     transit_line = [(1, 3), (3, 12), (12, 13), (4, 11), (11, 14), (14, 23), (23, 24), (5, 9), (9, 10), (10, 15), (15, 22), (22, 21), (2, 6), (6, 8), (8, 16), (16, 17), (17, 19), (19, 20),
                     (3, 1), (12, 3), (13, 12), (11, 4), (14, 11), (23, 14), (24, 23), (9, 5), (10, 9), (15, 10), (22, 15), (21, 22), (6, 2), (8, 6), (16, 8), (17, 16), (19, 17), (20, 19)]  
+elif transit_scenario == 4:
+    transit_line = [(2, 6), (6, 8), (8, 16), (16, 17), (17, 19), (19, 20), (20, 21), (21, 24), (24, 13), (12, 11), (11, 10), (10, 16),
+                    (6, 2), (8, 6), (16, 8), (17, 16), (19, 17), (20, 19), (21, 20), (24, 21), (13, 24), (11, 12), (10, 11), (16, 10)]  
+elif transit_scenario == 5: # additional transit lines
+    transit_line = [(2, 6), (6, 8), (8, 16), (16, 17), (17, 19), (19, 20), (20, 21), (21, 24), (24, 13), (12, 11), (11, 10), (10, 16), (24, 23), (23, 14), (14, 11), (11, 10), (10, 16), 
+                    (6, 2), (8, 6), (16, 8), (17, 16), (19, 17), (20, 19), (21, 20), (24, 21), (13, 24), (11, 12), (10, 11), (16, 10), (23, 24), (14, 23), (11, 14), (10, 11), (16, 10)]  
+    
 
 if dist == 1:
     od_df = pd.read_csv("../data/SiouxFalls/SiouxFalls_od.csv")
@@ -153,7 +183,13 @@ arcs = list(network_df[['init_node', 'term_node']].to_records(index=False))
 demand = {(int(row['O']),int(row['D'])): row['Ton'] for index, row in od_df.iterrows()}
 ods = list(demand.keys())
 road_link = [(int(row['init_node']), int(row['term_node']), row['length']) for _, row in network_df.iterrows()]
-oper_cost = {(int(row['init_node']), int(row['term_node'])): row['length'] * fuel_cost_per_min for _, row in network_df.iterrows()}
+arc_length = {(int(row['init_node']), int(row['term_node'])): row['length'] for _, row in network_df.iterrows()}
+
+if tolling_roads:
+    toll_cost = {(int(row['init_node']), int(row['term_node'])): toll if (int(row['init_node']), int(row['term_node'])) in tolling_roads else 0 for _, row in network_df.iterrows()}
+else:
+    toll_cost = {(int(row['init_node']), int(row['term_node'])): 0 for _, row in network_df.iterrows()}
+
 
 
 # Find shortest path travel time
@@ -221,7 +257,7 @@ def indicator(arc, route):
     return False
 
 
-def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, ASC, bpr_func, link_capacity):
+def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, ASC, arc_length, bpr_func, link_capacity):
     eps = 1e-3
 
     m = gp.Model()
@@ -243,6 +279,9 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     m._nodes = list(range(1, n_nodes+1))
     m._alternatives = list(range(1, n_alternative+1))
     m._arcs = [tuple(int(a) for a in arc) for arc in arcs]
+
+    
+
     m._ods = ods #[(id1+1, id2+1) for id1, o in enumerate(O_demand) for id2, d in enumerate(D_demand) if o>0 or d>0 if id1 != id2]
     #m._routes = routes# {key:create_route(key) for key in m._ods}
 
@@ -271,6 +310,7 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
     
     
     m._F = m.addMVar((a_dim), vtype = gp.GRB.CONTINUOUS, name = 'F')
+    m._G = m.addMVar((a_dim), vtype = gp.GRB.CONTINUOUS, name = 'G')
 
     m.addConstrs((gp.quicksum(m._z_vars[j, r, od] for r in range(r_dim)) == m._theta_vars[j, od] for j in range(j_dim) for od in range(od_dim)), name="constraintQ(a)")
     m.addConstrs((gp.quicksum(m._theta_vars[j, od] for j in range(j_dim)) <= 1 for od in range(od_dim)), name="constraintQ(b)")
@@ -316,6 +356,11 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
 
     m.addConstrs((gp.quicksum(incidence_matrix[n_ind, :] @ m._y_vars[j_ind, :, od_ind] for od_ind in range(od_dim)) == 0 for j_ind in range(j_dim) for n_ind, node in enumerate(m._nodes)), name="constraintQ (e)")
     
+    # fleet size constraints 
+    if fleet_size: # if fleet size is given, add the constraints
+        m.addConstr(gp.quicksum(m._y_vars[j_ind, a_ind, od_ind] * arc_length[a] for j_ind in range(j_dim) for (a_ind, a) in enumerate(m._arcs) for od_ind in range(od_dim)) <= fleet_size, name="constraintQ(f)")
+
+
             
     bins = n_bins
     xs = [1/bins*i for i in range(bins+1)]
@@ -328,7 +373,6 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
 
     ys = [math.log(p) if p > 0 else -1e3 for p in xs] # -1e5 represents -infty. Extremely large value cause numerical stability issues
 
-    
     # constraints for profit extracting term
     for (od_ind, (s, t)) in enumerate(m._ods):
         #m.addGenConstrLog(m._theta_n[s,t], m._profit_extracting_log[s,t], name = "ln_profit")
@@ -339,21 +383,24 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
 
     m.addConstrs((m._congest_tt[j_ind, od_ind] == indicator_matrix[j_ind, od_ind, :, :] @ m._z_vars[j_ind, :, od_ind] @ m._F for j_ind in range(j_dim) for od_ind in range(od_dim)), name = "congest_tt")
 
-    # m.addConstrs((m._F[a_ind] == m._bpr_func[a](m._f_vars[a_ind]) for (a_ind, a) in enumerate(m._arcs)), name = "F_function") 
+    # m.addConstrs((m._G[a_ind] == m._bpr_func[a](0) for (a_ind, a) in enumerate(m._arcs)), name = "G_function")  # G can be set as different function or the same as F
     # Note: Gurobi cannot handle quadratic function as it is. We need piecewise linear approximation as below. 
 
     # Piecewise linear approximation of BPR function
-    # bins = 15
+    # TODO: check if this implementation is correct
+    bins = 12
     for (a_ind, a) in enumerate(m._arcs):
-        xs = [m._link_capacity[a]/bins*i for i in range(bins+1)] # the upper bound of volumn to capacity (V/C) ratio is set to 1. 
+        xs = [m._link_capacity[a] * 1.2 /bins*i for i in range(bins+1)] # the upper bound of volumn to capacity (V/C) ratio is set to 1. 
         ys = [m._bpr_func[a](p) for p in xs] 
         m.addGenConstrPWL(m._f_vars[a_ind], m._F[a_ind], xs, ys, "F_function")
 
-    obj_util = gp.quicksum(demand[s,t]/p_sen * gp.quicksum(m._theta_vars[j_ind, od_ind] * (- m._ASC[(s, t), j] + m._T[(s, t), j] + ASC[(s, t), 2] - T[(s, t), 2]) for (j_ind, j) in enumerate(m._alternatives)) for (od_ind, (s, t)) in enumerate(m._ods)) # objective function (A)
+
+
+    obj_util = gp.quicksum(demand[s,t]/p_sen * gp.quicksum(m._theta_vars[j_ind, od_ind] * (- m._ASC[(s, t), j] + m._T[(s, t), j] + ASC[(s, t), 2] - T[(s, t), 2] - p_sen*2.5) for (j_ind, j) in enumerate(m._alternatives)) for (od_ind, (s, t)) in enumerate(m._ods)) # objective function (A)
     obj_congest = gp.quicksum(demand[s,t]/p_sen * m._congest_tt[j_ind, od_ind] for j_ind in range(j_dim) for (od_ind, (s, t)) in enumerate(m._ods))
     obj_entropy = gp.quicksum(demand[s,t]/p_sen * gp.quicksum(m._theta_lntheta_vars[(s, t), j] for j in m._alternatives) for (s, t) in m._ods) # objective function (B)
     obj_profit_extracting = - gp.quicksum(demand[s,t]/p_sen * gp.quicksum(m._profit_extracting_term[(s, t), j] for j in m._alternatives) for (s, t) in m._ods) # objective function (C) 
-    obj_oper_cost = gp.quicksum(gp.quicksum((m._F[a_ind] * fuel_cost_per_min + oper_cost[a]) * m._y_vars[j_ind, a_ind, od_ind] for (a_ind, a) in enumerate(m._arcs)) for (j_ind, j) in enumerate(m._alternatives) for (od_ind, (s, t)) in enumerate(m._ods)) # objective function (D)
+    obj_oper_cost = gp.quicksum(gp.quicksum((m._F[a_ind] * fuel_cost_per_km + toll_cost[a]) * m._y_vars[j_ind, a_ind, od_ind] for (a_ind, a) in enumerate(m._arcs)) for (j_ind, j) in enumerate(m._alternatives) for (od_ind, (s, t)) in enumerate(m._ods)) # objective function (D)
     # define objective function
     m.setObjective(obj_util + obj_congest + obj_entropy + obj_oper_cost + obj_profit_extracting)  #
 
@@ -376,7 +423,7 @@ def profit_maximization(n_nodes, arcs, routes, n_alternative, ods, demand, T, AS
 
 open("{}".format("../log/" + file_name + ".txt"), "w") # make sure to overwrite previous file 
 
-result = profit_maximization(n_nodes, arcs, OD_route, n_alternative, ods, demand, T, ASC, bpr_func, link_capacity)
+result = profit_maximization(n_nodes, arcs, OD_route, n_alternative, ods, demand, T, ASC, arc_length, bpr_func, link_capacity)
 
 
 # open a file in write mode
