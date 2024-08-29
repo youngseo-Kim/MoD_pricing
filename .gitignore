@@ -12,6 +12,7 @@ figures/
 output/
 model/
 log/
+log_backup/
 backup/
 
 .DS_Store
