@@ -87,6 +87,7 @@ fuel_cost_per_km = oper_cost # USD per km
 vot = 20 #$/hr
 p_sen = 1/vot*60 # cost to min
 Transit_ASC = -10 # -10, -20, .., -100
+MOD2_ASC = + 5
 
 
 if transit_scenario == 1:
@@ -247,7 +248,7 @@ if n_alternative == 2:
     ASC = {}
     for (s, t) in ods:
         ASC[(s, t), 1] = 0 # MoD
-        ASC[(s, t), 2] = 0 # MoD
+        ASC[(s, t), 2] = MOD2_ASC # MoD
         ASC[(s, t), 3] = Transit_ASC # Transit
 
 elif n_alternative == 1: 
@@ -260,8 +261,6 @@ elif n_alternative == 1:
     for (s, t) in ods:
         ASC[(s, t), 1] = 0 # MoD
         ASC[(s, t), 2] = Transit_ASC # Transit
-
-
 
 
 
