@@ -1,17 +1,17 @@
 # MoD_pricing
 
-This repository provides the Python implementation to characterize the company-traveler equilibrium defined in the following paper. 
+This repository provides the Python implementation to characterize the company-traveler equilibrium defined in the [following paper](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4950974). 
 
-Strategic Pricing and Routing to Maximize Profit in Congested Roads Considering Interactions with Travelers [link](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4950974)
+Strategic Pricing and Routing to Maximize Profit in Congested Roads Considering Interactions with Travelers
 Youngseo Kim, Ning Duan, Gioele Zardini, Samitha Samaranayake, and Damon Wischik, Transactions on Control of Network Systems, 2024.
 
 ---
-## prerequisite
-Gurobi: You can get free academic licence in the following link: [license](https://www.gurobi.com/academia/academic-program-and-licenses/).
+## Prerequisite
+Gurobi: You can get free academic licence in the [following link](https://www.gurobi.com/academia/academic-program-and-licenses/).
 
 ## Project Structure
 
-- `data/`: JSON, CSV, and text files are used to represent the transportation network. We utilize the Sioux Falls network obtained from [here](https://github.com/bstabler/TransportationNetworks/tree/master/SiouxFalls).
+- `data/`: JSON, CSV, and text files are used to represent the transportation network. We utilize the Sioux Falls network obtained from [this source](https://github.com/bstabler/TransportationNetworks/tree/master/SiouxFalls).
 - `src/`: Main implementation to build and solve the model. Follow the guidelines for more details. 
 - `log/`: Saving logging file for intermediate solutions of MILP. 
 - `model/`: Saving optimization models as mps files. It can be used to tune the parameters. 
@@ -35,7 +35,7 @@ sh runsim.sh
 ```
 
 III) Visualize results
-`src/analyze_result.ipynb` is to analyze and visualize the output results. `src/plot_log.ipynb` is to plot the change of optimality gap over time. 
+`src/analyze_result.ipynb` is to analyze and visualize the output results. 
 
 
 
