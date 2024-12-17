@@ -1,40 +1,43 @@
 # MoD_pricing
 
-This is the implementation for this paper (to be updated).
+This repository provides the Python implementation to characterize the company-traveler equilibrium defined in the following paper. 
+
+Strategic Pricing and Routing to Maximize Profit in Congested Roads Considering Interactions with Travelers [link](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4950974)
+Youngseo Kim, Ning Duan, Gioele Zardini, Samitha Samaranayake, and Damon Wischik, Transactions on Control of Network Systems, 2024.
 
 ---
 ## prerequisite
-Gurobi
-
+Gurobi: You can get free academic licence in the following link: [license](https://www.gurobi.com/academia/academic-program-and-licenses/).
 
 ## Project Structure
 
-- `data/`: json, csv, text file to indicate transporation network. Currently, SiouxFall network is considered. 
-- `log/`: save logging file for intermediate solutions of MILP. `src/plot_log.ipynb` uses these logs to plot the change of optimality gap over time. 
-- `model/`: save optimization models as mps files. It can be used to tune the parameters. 
-- `output/`: save output solutions after solving an optimization problem. `src/analyze_result.ipynb` uses this output to visualize prices, market share, vehicle flows, and road congestions. 
-- `src/`: main implementation to build and solve model. Follow the Guideline for more details. 
-
+- `data/`: JSON, CSV, and text files are used to represent the transportation network. We utilize the Sioux Falls network obtained from [here](https://github.com/bstabler/TransportationNetworks/tree/master/SiouxFalls).
+- `src/`: Main implementation to build and solve the model. Follow the guidelines for more details. 
+- `log/`: Saving logging file for intermediate solutions of MILP. 
+- `model/`: Saving optimization models as mps files. It can be used to tune the parameters. 
+- `output/`: Saving output solutions after solving an optimization problem. 
 
 ## Guideline
 
+Before you start, download Gurobi license and create empty directories `log/`, `model/`, `output/`. Move to the `src/` directory. 
+
 I) Run single script SiouxFalls.py
-`src/SiouxFalls.py` is the main implementation to solve the convex programming using Gurobi. 
+`src/SiouxFalls.py` is the main implementation for solving the proposed formulation using Gurobi with a piecewise linear approximation.
 
 ```
-python SiouxFalls.py --alpha 0 --beta 1 --mip_gap 0.01 --n_ods 10 --transit_scenario 2 --n_bins 10
+python SiouxFalls.py --n_ods 50 --dist 1 --alpha 0.15 --beta 4 --n_alter 1 --transit_scenario 2 --n_bins 15 --oper_cost 0.08 --exo_private 0 --mip_gap 0.05 --time_limit 18000
 ```
 
 II) Run `src/runsim.sh` to repeat the experiments. 
 
-III) Visualize resuylts
+```
+sh runsim.sh 
+```
+
+III) Visualize results
 `src/analyze_result.ipynb` is to analyze and visualize the output results. `src/plot_log.ipynb` is to plot the change of optimality gap over time. 
 
 
-## Tune the parameter
 
-[Resource](https://www.gurobi.com/documentation/current/refman/parameter_tuning_tool.html)
-```
-grbtune NonConvex=2 TuneTimeLimit=30000 output/model_name.mps
-```
-
+## Contact
+If you have any questions or suggestions about the code, please contact us at the following email: yk796@cornell.edu
